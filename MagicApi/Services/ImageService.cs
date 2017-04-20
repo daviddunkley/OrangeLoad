@@ -51,21 +51,13 @@ namespace MagicApi.Services
         {
             var bitmap = _images[imageName];
 
-            var incrementColor = Color.FromArgb(
+            var color = Color.FromArgb(
                 255,
                 255,
-                _random.Next(128, 215),
+                172,
                 0);
 
-            var currentColor = bitmap.GetPixel(x, y);
-
-            var newColor = Color.FromArgb(
-                (incrementColor.A + currentColor.A) / 2,
-                (incrementColor.R + currentColor.R) / 2,
-                (incrementColor.G + currentColor.G) / 2,
-                (incrementColor.B + currentColor.B) / 2);
-
-            bitmap.SetPixel(x, y, newColor);
+            bitmap.SetPixel(x, y, color);
 
             _images[imageName] = bitmap;
         }

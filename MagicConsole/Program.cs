@@ -16,17 +16,23 @@ namespace MagicConsole
         {
             var width = Convert.ToInt32(args[0]);
             var height = Convert.ToInt32(args[1]);
-            var requestCount = Convert.ToInt64(args[2]);
+            var level = args[2];
             var magicApiEndpoint = new Uri(ConfigurationManager.AppSettings["MagicApiEndpoint"]);
+            var client = new RestClient(magicApiEndpoint);
+            client.AddDefaultHeader("X-Level", level);
+
             var sw = new Stopwatch();
             sw.Start();
 
-            var run = CreateRun(magicApiEndpoint, width, height);
+            var run = CreateRun(client, width, height);
             Console.WriteLine($"{sw.ElapsedMilliseconds:D6}: Created the Run.");
 
-            var responseCodes = CreatePoints(magicApiEndpoint, run, requestCount);
+            var tasks = CreatePoints(client, run);
+            Console.WriteLine($"{sw.ElapsedMilliseconds:D6}: Created the {run.Width * run.Height} points.");
 
-            Console.WriteLine($"{sw.ElapsedMilliseconds:D6}: Created the {requestCount} points.");
+            var responseCodes = WaitForPoints(tasks);
+            Console.WriteLine($"{sw.ElapsedMilliseconds:D6}: Waited for the {run.Width * run.Height} points to return.");
+
             Console.WriteLine($"    Create Point returned with the following Response Codes");
 
             foreach (var responseCode in responseCodes)
@@ -34,14 +40,13 @@ namespace MagicConsole
                 Console.WriteLine($"        {responseCode.Key}: {responseCode.Value}");
             }
 
-            var imageUrl = EndRun(magicApiEndpoint, run);
+            var imageUrl = EndRun(client, run);
 
             Console.WriteLine($"{sw.ElapsedMilliseconds:D6}: Ended the Run.");
             Console.WriteLine($"    ImageUri: {imageUrl}");
-            Console.ReadLine();
         }
 
-        private static Run CreateRun(Uri apiEndpoint, int width, int height)
+        private static Run CreateRun(IRestClient client, int width, int height)
         {
             var runId = Guid.NewGuid();
             var run = new Run()
@@ -52,8 +57,6 @@ namespace MagicConsole
                 Height = height
             };
             
-
-            var client = new RestClient(apiEndpoint);
             var request = new RestRequest("runs", Method.POST)
                 {
                     RequestFormat = DataFormat.Json
@@ -73,9 +76,8 @@ namespace MagicConsole
             throw new Exception();
         }
 
-        private static string EndRun(Uri apiEndpoint, Run run)
+        private static string EndRun(IRestClient client, Run run)
         {
-            var client = new RestClient(apiEndpoint);
             var request = new RestRequest($"/runs/{run.Id}/end/", Method.POST);
 
             var response = client.Execute(request);
@@ -94,8 +96,7 @@ namespace MagicConsole
                     }
                 };
                 proc.Start();
-                proc.WaitForExit();
-                proc.Close();
+
                 return imageUri;
             }
             else
@@ -106,32 +107,38 @@ namespace MagicConsole
             }
         }
 
-        private static Dictionary<string, long> CreatePoints(Uri apiEndpoint, Run run, long requestCount)
+        private static List<Task> CreatePoints(IRestClient client, Run run)
         {
-            var rnd = new Random();
-            var client = new RestClient(apiEndpoint);
-            var responseCodes = new Dictionary<string, long>();
             var tasks = new List<Task>();
 
-            for (var i = 0; i < requestCount; i++)
+            for (var x = 0; x < run.Width; x++)
             {
-                var runPoint = new RunPoint()
+                for (var y = 0; y < run.Height; y++)
                 {
-                    X = rnd.Next(0, run.Width),
-                    Y = rnd.Next(0, run.Height),
-                };
+                    var runPoint = new RunPoint()
+                    {
+                        X = x,
+                        Y = y,
+                    };
 
-                var request = new RestRequest($"/runs/{run.Id}/point/", Method.POST)
-                {
-                    RequestFormat = DataFormat.Json,
+                    var request = new RestRequest($"/runs/{run.Id}/point/", Method.POST)
+                        {
+                            RequestFormat = DataFormat.Json,
+                        }
+                        .AddBody(runPoint);
+
+                    tasks.Add(client.ExecuteTaskAsync(request));
                 }
-                    .AddBody(runPoint);
-
-                tasks.Add(client.ExecuteTaskAsync(request));
             }
 
+            return tasks;
+        }
+
+        private static Dictionary<string, long> WaitForPoints(List<Task> tasks)
+        {
             Task.WaitAll(tasks.ToArray());
 
+            var responseCodes = new Dictionary<string, long>();
             foreach (var task in tasks)
             {
                 var restResponse = (task as Task<IRestResponse>)?.Result;
